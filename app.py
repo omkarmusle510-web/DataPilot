@@ -6,11 +6,11 @@ Entry point for DataPilot AI's Slack bot (Socket Mode).
 Responsibilities:
 - Bootstrap the Slack Bolt app and environment configuration.
 - Listen for @mentions and parse supported commands
-  ("explain", "clean", "generate").
+  ("explain", "clean", "generate", "optimize").
 - Delegate business logic to services.analyzer.SQLAnalyzer,
-  services.cleaner.SQLCleaner, and services.generator.SQLGenerator,
-  all constructed with a single shared AI provider obtained from the
-  provider factory.
+  services.cleaner.SQLCleaner, services.generator.SQLGenerator, and
+  services.optimizer.SQLOptimizer, all constructed with a single
+  shared AI provider obtained from the provider factory.
 - Render responses as Slack Block Kit messages.
 
 This module has NO knowledge of which AI vendor is active. It never
@@ -23,7 +23,7 @@ provider based on the AI_PROVIDER environment variable.
 import logging
 import os
 import re
-from typing import Callable, NamedTuple
+from typing import Callable, Final, NamedTuple
 
 from dotenv import load_dotenv
 from slack_bolt import App
@@ -33,6 +33,7 @@ from services.ai import get_provider
 from services.analyzer import SQLAnalyzer, SQLExplanationError
 from services.cleaner import SQLCleaner, SQLCleanerError
 from services.generator import SQLGenerator, SQLGeneratorError
+from services.optimizer import SQLOptimizer, SQLOptimizerError
 
 load_dotenv()
 
@@ -53,6 +54,7 @@ provider = get_provider()
 analyzer = SQLAnalyzer(provider)
 cleaner = SQLCleaner(provider)
 generator = SQLGenerator(provider)
+optimizer = SQLOptimizer(provider)
 
 logger.info(
     "DataPilot AI configured with AI provider: name=%s, vendor=%s, model=%s",
@@ -61,9 +63,20 @@ logger.info(
     getattr(provider, "model", "unknown"),
 )
 
+# Central source of truth for supported command keywords. The parsing
+# regex is built dynamically from this tuple, so adding a new command
+# only ever requires a new _COMMAND_HANDLERS entry plus a name here —
+# no regex or parsing logic changes.
+SUPPORTED_COMMANDS: Final[tuple[str, ...]] = (
+    "explain",
+    "clean",
+    "generate",
+    "optimize",
+)
+
 _MENTION_PATTERN = re.compile(r"<@[^>]+>")
 _COMMAND_PATTERN = re.compile(
-    r"^\s*(explain|clean|generate)\s*(.*)$", re.IGNORECASE | re.DOTALL
+    rf"^\s*({'|'.join(SUPPORTED_COMMANDS)})\s*(.*)$", re.IGNORECASE | re.DOTALL
 )
 
 
@@ -73,8 +86,8 @@ def _parse_command(raw_text: str) -> tuple[str, str] | None:
     its argument text.
 
     Strips the leading user-mention token (e.g. "<@U123ABC>"), then
-    checks whether the remaining text starts with a supported command
-    keyword ("explain", "clean", or "generate").
+    checks whether the remaining text starts with one of the keywords
+    in SUPPORTED_COMMANDS.
 
     Args:
         raw_text: The full text of the Slack event, including the
@@ -82,7 +95,7 @@ def _parse_command(raw_text: str) -> tuple[str, str] | None:
 
     Returns:
         A tuple of (command_name, argument_text) where command_name is
-        lowercase ("explain", "clean", or "generate") and argument_text
+        lowercase and a member of SUPPORTED_COMMANDS, and argument_text
         may be an empty string if the user typed only the command with
         nothing after it. Returns None if the message does not use any
         supported command.
@@ -94,6 +107,20 @@ def _parse_command(raw_text: str) -> tuple[str, str] | None:
     command = match.group(1).lower()
     argument_text = match.group(2).strip()
     return command, argument_text
+
+
+def _build_footer_context() -> dict:
+    """
+    Build the shared Block Kit context footer used by every command
+    response, keeping the branding line defined in exactly one place.
+
+    Returns:
+        A single Block Kit "context" block dictionary.
+    """
+    return {
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": "🤖 Powered by DataPilot AI"}],
+    }
 
 
 def _build_explanation_blocks(sql_query: str, explanation: str) -> list[dict]:
@@ -112,10 +139,7 @@ def _build_explanation_blocks(sql_query: str, explanation: str) -> list[dict]:
         {"type": "section", "text": {"type": "mrkdwn", "text": f"```{sql_query}```"}},
         {"type": "divider"},
         {"type": "section", "text": {"type": "mrkdwn", "text": explanation}},
-        {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": "🤖 Powered by DataPilot AI"}],
-        },
+        _build_footer_context(),
     ]
 
 
@@ -142,10 +166,7 @@ def _build_cleaned_sql_blocks(original_sql: str, cleaned_sql: str) -> list[dict]
             "type": "section",
             "text": {"type": "mrkdwn", "text": f"*Formatted:*\n```{cleaned_sql}```"},
         },
-        {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": "🤖 Powered by DataPilot AI"}],
-        },
+        _build_footer_context(),
     ]
 
 
@@ -169,14 +190,35 @@ def _build_generated_sql_blocks(user_request: str, generated_sql: str) -> list[d
             "text": {"type": "mrkdwn", "text": f"*Request:*\n{user_request}"},
         },
         {"type": "divider"},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"```{generated_sql}```"}},
+        _build_footer_context(),
+    ]
+
+
+def _build_optimizer_blocks(sql_query: str, report: str) -> list[dict]:
+    """
+    Build a Block Kit message layout presenting a SQL performance
+    optimization report alongside the original query.
+
+    Args:
+        sql_query: The original SQL query submitted by the user.
+        report: The structured optimization report returned by the AI.
+
+    Returns:
+        A list of Slack Block Kit block dictionaries ready to send.
+    """
+    return [
+        {"type": "header", "text": {"type": "plain_text", "text": "⚡ SQL Performance Analysis"}},
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"```{generated_sql}```"},
+            "text": {"type": "mrkdwn", "text": f"*Original SQL:*\n```{sql_query}```"},
         },
+        {"type": "divider"},
         {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": "🤖 Powered by DataPilot AI"}],
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*Optimization Report:*\n{report}"},
         },
+        _build_footer_context(),
     ]
 
 
@@ -200,8 +242,8 @@ class _CommandSpec(NamedTuple):
 
 
 # Registry of supported commands. Adding a new command means adding
-# one entry here — no changes to the parsing logic or the event
-# handler's control flow are required.
+# one entry here and one keyword to SUPPORTED_COMMANDS — no changes to
+# the parsing logic or the event handler's control flow are required.
 _COMMAND_HANDLERS: dict[str, _CommandSpec] = {
     "explain": _CommandSpec(
         process=analyzer.explain_sql,
@@ -221,12 +263,22 @@ _COMMAND_HANDLERS: dict[str, _CommandSpec] = {
             "generate command."
         ),
     ),
+    "optimize": _CommandSpec(
+        process=optimizer.optimize_sql,
+        build_blocks=_build_optimizer_blocks,
+        missing_input_message="Please paste a SQL query after the optimize command.",
+    ),
 }
 
 # All business-logic services raise their own domain-specific error on
 # failure. They are handled identically at the Slack layer, so they
 # are caught together as a single tuple.
-_BUSINESS_ERRORS = (SQLExplanationError, SQLCleanerError, SQLGeneratorError)
+_BUSINESS_ERRORS = (
+    SQLExplanationError,
+    SQLCleanerError,
+    SQLGeneratorError,
+    SQLOptimizerError,
+)
 
 
 @app.event("app_mention")
@@ -239,8 +291,9 @@ def handle_app_mention(event: dict, say) -> None:
         - If a command is used with no argument text, asks the user
           to provide one.
         - If argument text is present, dispatches to the command's
-          processor (SQLAnalyzer, SQLCleaner, or SQLGenerator) and
-          replies with a Block Kit message containing the result.
+          processor (SQLAnalyzer, SQLCleaner, SQLGenerator, or
+          SQLOptimizer) and replies with a Block Kit message
+          containing the result.
         - Any failure (parsing, AI service, or unexpected) is caught
           and reported to the user safely, without crashing the app or
           leaking stack traces.
