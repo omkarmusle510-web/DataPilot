@@ -237,6 +237,6 @@ DataPilot brings these capabilities directly into Slack, allowing teams to colla
 
 ## 👨‍💻 Author
 
-Developed by **Mamba**
+Developed by **OMKAR MUSALE**
 
 Built for AI and Data Engineering Hackathons 🚀
