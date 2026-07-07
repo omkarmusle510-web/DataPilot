@@ -4,65 +4,34 @@ services/analyzer.py
 Business logic for DataPilot AI's SQL explanation feature.
 
 Responsibilities:
-- Communicate with the OpenAI API.
-- Construct prompts that instruct the model to explain SQL queries in
-  plain English.
-- Handle all OpenAI-related failure modes and translate them into a
-  single, safe, user-facing exception type.
+- Validate incoming SQL query text.
+- Construct the system/user prompts that instruct an AI model to
+  explain SQL queries in plain English.
+- Delegate the actual text generation to an injected AIProvider.
+- Translate provider-level failures into a single, domain-specific
+  exception type.
 
-This module has NO knowledge of Slack. It is a pure service layer that
-could be reused by any interface (Slack, CLI, HTTP API, etc.) without
-modification.
+This module has NO knowledge of any concrete AI vendor (Gemini,
+OpenAI, Claude, Groq, etc.) and NO knowledge of Slack. It depends only
+on the AIProvider abstraction, which is supplied via constructor
+injection. This satisfies the Dependency Inversion Principle: high-level
+business logic (this module) depends on an abstraction, not on a
+concrete implementation.
 """
 
 import logging
-import os
 from typing import Final
 
-from openai import (
-    OpenAI,
-    APIError,
-    APIConnectionError,
-    RateLimitError,
-    AuthenticationError,
-)
-from openai.types.chat import ChatCompletion
+from services.ai import AIProvider, AIProviderError
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MODEL: Final[str] = "gpt-4o-mini"
-
-_SYSTEM_PROMPT: Final[str] = ("""
-You are DataPilot AI, a Senior Data Engineer.
-
-Your job is to explain SQL queries clearly.
-
-For every SQL query provide:
-
-1. Purpose (one sentence)
-
-2. Step-by-step execution
-
-3. Tables involved
-
-4. Columns used
-
-5. Filters
-
-6. Joins
-
-7. Aggregations
-
-8. Sorting
-
-9. Final output
-
-10. Performance notes if applicable.
-
-Explain in beginner-friendly English using bullet points.
-
-Never simply repeat the SQL.
-"""
+_SYSTEM_PROMPT: Final[str] = (
+    "You are a senior data engineer. Explain SQL queries in plain, "
+    "simple English for someone who may not know SQL well. "
+    "Describe what tables/columns are involved, what filtering or "
+    "joining happens, and what the query ultimately returns. Keep it "
+    "concise (3-6 sentences) and do not simply restate the raw SQL."
 )
 
 
@@ -70,47 +39,42 @@ class SQLExplanationError(Exception):
     """
     Raised whenever the SQL explanation service cannot produce a result.
 
-    Callers (e.g. Slack event handlers) only need to catch this single
-    exception type; they do not need to know about OpenAI's internal
-    exception hierarchy.
+    Callers (e.g. Slack event handlers in app.py) only need to catch
+    this single exception type; they do not need to know about
+    AIProviderError or any underlying AI vendor's exception hierarchy.
     """
 
 
 class SQLAnalyzer:
     """
-    Encapsulates all logic needed to turn a raw SQL query string into a
-    plain-English explanation using an OpenAI chat model.
+    Encapsulates the business logic needed to turn a raw SQL query
+    string into a plain-English explanation.
 
-    This class is intentionally Slack-agnostic: it accepts a string in
-    and returns a string out (or raises SQLExplanationError), so it can
-    be unit-tested or reused outside of the Slack context entirely.
+    The actual text generation is delegated to an injected AIProvider
+    implementation, so this class is completely decoupled from any
+    specific AI vendor. It can be unit-tested with a mock/fake
+    AIProvider, and reused across interfaces (Slack, CLI, HTTP API)
+    without modification.
     """
 
-    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
+    def __init__(self, provider: AIProvider) -> None:
         """
-        Initialize the analyzer with a configured OpenAI client.
+        Initialize the analyzer with an injected AI provider.
 
         Args:
-            api_key: OpenAI API key. Falls back to the OPENAI_API_KEY
-                environment variable if not provided.
-            model: OpenAI chat model name. Falls back to the OPENAI_MODEL
-                environment variable, then to a hardcoded default.
-
-        Raises:
-            ValueError: If no API key is available from either the
-                argument or the environment.
+            provider: A concrete AIProvider implementation (e.g.
+                GeminiProvider, OpenAIProvider) responsible for actual
+                text generation. This analyzer never constructs or
+                imports a concrete provider itself.
         """
-        resolved_key = api_key or os.getenv("OPENAI_API_KEY")
-        if not resolved_key:
-            raise ValueError(
-                "OpenAI API key not found. Set OPENAI_API_KEY in your "
-                "environment or pass api_key explicitly."
-            )
+        self._provider: AIProvider = provider
 
-        self._model: str = model or os.getenv("OPENAI_MODEL", _DEFAULT_MODEL)
-        self._client: OpenAI = OpenAI(api_key=resolved_key)
-
-        logger.debug("SQLAnalyzer initialized with model=%s", self._model)
+        logger.debug(
+            "SQLAnalyzer initialized with provider=%s (vendor=%s, model=%s)",
+            getattr(provider, "name", provider.__class__.__name__),
+            getattr(provider, "vendor", "unknown"),
+            getattr(provider, "model", "unknown"),
+        )
 
     def explain_sql(self, sql_query: str) -> str:
         """
@@ -123,86 +87,50 @@ class SQLAnalyzer:
             A plain-English explanation of the query.
 
         Raises:
-            SQLExplanationError: If the query is empty/invalid, or if the
-                OpenAI API call fails for any reason (authentication,
-                rate limiting, connection issues, or an unexpected API
-                error), or if the API response is empty/malformed.
+            SQLExplanationError: If the query is empty/invalid, or if
+                the underlying AI provider fails to generate a valid
+                explanation for any reason.
         """
         cleaned_query = sql_query.strip()
         if not cleaned_query:
+            logger.warning("SQL explanation requested with empty query text.")
             raise SQLExplanationError("No SQL query was provided to explain.")
 
-        logger.info("Requesting SQL explanation. Query length=%d chars", len(cleaned_query))
+        logger.info(
+            "Requesting SQL explanation via provider=%s. query_length=%d chars",
+            getattr(self._provider, "name", self._provider.__class__.__name__),
+            len(cleaned_query),
+        )
+        logger.debug("Full SQL query to explain: %s", cleaned_query)
+
+        user_prompt = f"Explain this SQL query:\n\n{cleaned_query}"
 
         try:
-            response: ChatCompletion = self._client.chat.completions.create(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": f"Explain this SQL query:\n\n{cleaned_query}",
-                    },
-                ],
-                temperature=0.3,
-                max_tokens=400,
+            explanation = self._provider.generate(
+                system_prompt=_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
             )
-        except AuthenticationError as exc:
-            logger.error("OpenAI authentication failed: %s", exc)
+        except AIProviderError as exc:
+            logger.error("AI provider failed to explain SQL query: %s", exc)
             raise SQLExplanationError(
-                "Authentication with the AI service failed. Please check "
-                "the API key configuration."
-            ) from exc
-        except RateLimitError as exc:
-            logger.error("OpenAI rate limit exceeded: %s", exc)
-            raise SQLExplanationError(
-                "The AI service is currently rate-limited. Please try "
-                "again shortly."
-            ) from exc
-        except APIConnectionError as exc:
-            logger.error("Failed to connect to OpenAI API: %s", exc)
-            raise SQLExplanationError(
-                "Could not connect to the AI service. Please check your "
-                "network connection."
-            ) from exc
-        except APIError as exc:
-            logger.error("OpenAI API returned an error: %s", exc)
-            raise SQLExplanationError(
-                "The AI service returned an error while explaining the query."
+                "The AI service was unable to explain this query. "
+                "Please try again shortly."
             ) from exc
         except Exception as exc:  # noqa: BLE001 - final safety net, always logged
-            logger.exception("Unexpected error while explaining SQL query.")
+            logger.exception(
+                "Unexpected error while explaining SQL query via provider."
+            )
             raise SQLExplanationError(
                 "An unexpected error occurred while explaining the query."
             ) from exc
 
-        return self._extract_explanation(response)
-
-    @staticmethod
-    def _extract_explanation(response: ChatCompletion) -> str:
-        """
-        Safely extract the explanation text from an OpenAI ChatCompletion.
-
-        Args:
-            response: The raw ChatCompletion object returned by the
-                OpenAI SDK.
-
-        Returns:
-            The explanation text, stripped of leading/trailing whitespace.
-
-        Raises:
-            SQLExplanationError: If the response contains no usable
-                content (missing choices, missing message, or empty text).
-        """
-        try:
-            content = response.choices[0].message.content
-        except (IndexError, AttributeError) as exc:
-            logger.error("OpenAI response missing expected structure: %r", response)
-            raise SQLExplanationError(
-                "The AI service returned an empty or malformed response."
-            ) from exc
-
-        if not content or not content.strip():
+        cleaned_explanation = explanation.strip()
+        if not cleaned_explanation:
+            logger.error("AI provider returned an empty explanation string.")
             raise SQLExplanationError("The AI service returned an empty explanation.")
 
-        return content.strip()
+        logger.info(
+            "SQL explanation generated successfully. explanation_length=%d chars",
+            len(cleaned_explanation),
+        )
+        return cleaned_explanation
