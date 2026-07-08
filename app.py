@@ -13,6 +13,9 @@ Responsibilities:
   all constructed with a single shared AI provider obtained from the
   provider factory.
 - Render responses as Slack Block Kit messages.
+- Persist every command execution (successful or failed) to SQLite via
+  HistoryRepository, without ever letting a persistence failure affect
+  Slack responsiveness.
 
 This module has NO knowledge of which AI vendor is active. It never
 imports a concrete provider class (e.g. GeminiProvider) and never
@@ -24,12 +27,14 @@ provider based on the AI_PROVIDER environment variable.
 import logging
 import os
 import re
+import time
 from typing import Callable, Final, NamedTuple
 
 from dotenv import load_dotenv
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
+from database import DatabaseManager, HistoryRepository, HistoryRepositoryError
 from services.ai import get_provider
 from services.analyzer import SQLAnalyzer, SQLExplanationError
 from services.cleaner import SQLCleaner, SQLCleanerError
@@ -58,6 +63,13 @@ cleaner = SQLCleaner(provider)
 generator = SQLGenerator(provider)
 optimizer = SQLOptimizer(provider)
 validator = SQLValidator(provider)
+
+# A single DatabaseManager and HistoryRepository are constructed once
+# at startup and reused for the lifetime of the application, mirroring
+# how the shared AI `provider` instance is handled. Never construct
+# these inside handle_app_mention().
+db_manager = DatabaseManager()
+history_repository = HistoryRepository(db_manager)
 
 logger.info(
     "DataPilot AI configured with AI provider: name=%s, vendor=%s, model=%s",
@@ -318,6 +330,58 @@ _BUSINESS_ERRORS = (
 )
 
 
+def _save_history(
+    user_id: str,
+    command: str,
+    input_text: str,
+    output_text: str,
+    execution_time: float,
+    duration_ms: int,
+    success: bool,
+    error_message: str | None,
+) -> None:
+    """
+    Persist a single command execution record to history.
+
+    This is a best-effort operation: history is a secondary feature,
+    so any failure while saving is logged and swallowed rather than
+    propagated. A database outage must never prevent the Slack bot
+    from responding to the user.
+
+    Args:
+        user_id: Slack user ID who invoked the command.
+        command: Command name (e.g. "explain", "clean", "generate",
+            "optimize", "validate").
+        input_text: The raw argument text submitted for the command.
+        output_text: The result produced by the command, or an empty
+            string if the command failed.
+        execution_time: Execution time in seconds.
+        duration_ms: Execution time in integer milliseconds.
+        success: Whether the command completed successfully.
+        error_message: The error message if the command failed, or
+            None if it succeeded.
+    """
+    try:
+        history_repository.save_command(
+            user_id=user_id,
+            command=command,
+            input_text=input_text,
+            output_text=output_text,
+            provider=getattr(provider, "vendor", "unknown"),
+            model=getattr(provider, "model", "unknown"),
+            execution_time=execution_time,
+            success=success,
+            error_message=error_message,
+            duration_ms=duration_ms,
+        )
+    except HistoryRepositoryError:
+        logger.exception(
+            "Failed to save command history. command=%s, user_id=%s",
+            command,
+            user_id,
+        )
+
+
 @app.event("app_mention")
 def handle_app_mention(event: dict, say) -> None:
     """
@@ -331,6 +395,9 @@ def handle_app_mention(event: dict, say) -> None:
           processor (SQLAnalyzer, SQLCleaner, SQLGenerator,
           SQLOptimizer, or SQLValidator) and replies with a Block Kit
           message containing the result.
+        - Every successful or failed command execution is persisted to
+          history via HistoryRepository. Persistence failures are
+          logged but never prevent a Slack response.
         - Any failure (parsing, AI service, or unexpected) is caught
           and reported to the user safely, without crashing the app or
           leaking stack traces.
@@ -353,7 +420,37 @@ def handle_app_mention(event: dict, say) -> None:
             say(text=spec.missing_input_message)
             return
 
-        result = spec.process(argument_text)
+        user_id = event.get("user", "unknown")
+        start_time = time.perf_counter()
+
+        try:
+            result = spec.process(argument_text)
+        except _BUSINESS_ERRORS as exc:
+            execution_time = time.perf_counter() - start_time
+            _save_history(
+                user_id=user_id,
+                command=command,
+                input_text=argument_text,
+                output_text="",
+                execution_time=execution_time,
+                duration_ms=int(execution_time * 1000),
+                success=False,
+                error_message=str(exc),
+            )
+            raise
+
+        execution_time = time.perf_counter() - start_time
+        _save_history(
+            user_id=user_id,
+            command=command,
+            input_text=argument_text,
+            output_text=result,
+            execution_time=execution_time,
+            duration_ms=int(execution_time * 1000),
+            success=True,
+            error_message=None,
+        )
+
         say(blocks=spec.build_blocks(argument_text, result), text=f"SQL {command.capitalize()}")
 
     except _BUSINESS_ERRORS as exc:

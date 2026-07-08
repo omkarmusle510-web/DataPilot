@@ -17,6 +17,7 @@ from typing import Callable
 
 from services.ai.base import AIProvider
 from services.ai.gemini_provider import GeminiProvider
+from services.ai.groq_provider import GroqProvider
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +25,15 @@ _DEFAULT_PROVIDER = "gemini"
 
 # Registry mapping a provider name (as configured via AI_PROVIDER) to a
 # zero-argument callable that constructs the corresponding AIProvider.
-# To add a new provider (OpenAI, Claude, Groq, OpenRouter, DeepSeek,
-# Ollama, etc.):
+# To add a new provider (OpenAI, Claude, OpenRouter, DeepSeek, Ollama,
+# etc.):
 #   1. Create services/ai/<name>_provider.py implementing AIProvider.
 #   2. Import its class above.
 #   3. Add one entry to this dict.
 # No other file in the project needs to change.
 _PROVIDER_REGISTRY: dict[str, Callable[[], AIProvider]] = {
     "gemini": GeminiProvider,
+    "groq": GroqProvider,
 }
 
 
@@ -40,10 +42,10 @@ def get_provider(provider_name: str | None = None) -> AIProvider:
     Construct and return the configured AIProvider implementation.
 
     Args:
-        provider_name: Explicit provider name to use (e.g. "gemini").
-            If not provided, falls back to the AI_PROVIDER environment
-            variable, then to "gemini" if that is also unset. Matching
-            is case-insensitive.
+        provider_name: Explicit provider name to use (e.g. "gemini",
+            "groq"). If not provided, falls back to the AI_PROVIDER
+            environment variable, then to "gemini" if that is also
+            unset. Matching is case-insensitive.
 
     Returns:
         An instantiated AIProvider implementation ready for use.
