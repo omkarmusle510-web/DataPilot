@@ -6,11 +6,12 @@ Entry point for DataPilot AI's Slack bot (Socket Mode).
 Responsibilities:
 - Bootstrap the Slack Bolt app and environment configuration.
 - Listen for @mentions and parse supported commands
-  ("explain", "clean", "generate", "optimize").
+  ("explain", "clean", "generate", "optimize", "validate").
 - Delegate business logic to services.analyzer.SQLAnalyzer,
-  services.cleaner.SQLCleaner, services.generator.SQLGenerator, and
-  services.optimizer.SQLOptimizer, all constructed with a single
-  shared AI provider obtained from the provider factory.
+  services.cleaner.SQLCleaner, services.generator.SQLGenerator,
+  services.optimizer.SQLOptimizer, and services.validator.SQLValidator,
+  all constructed with a single shared AI provider obtained from the
+  provider factory.
 - Render responses as Slack Block Kit messages.
 
 This module has NO knowledge of which AI vendor is active. It never
@@ -34,6 +35,7 @@ from services.analyzer import SQLAnalyzer, SQLExplanationError
 from services.cleaner import SQLCleaner, SQLCleanerError
 from services.generator import SQLGenerator, SQLGeneratorError
 from services.optimizer import SQLOptimizer, SQLOptimizerError
+from services.validator import SQLValidator, SQLValidatorError
 
 load_dotenv()
 
@@ -55,6 +57,7 @@ analyzer = SQLAnalyzer(provider)
 cleaner = SQLCleaner(provider)
 generator = SQLGenerator(provider)
 optimizer = SQLOptimizer(provider)
+validator = SQLValidator(provider)
 
 logger.info(
     "DataPilot AI configured with AI provider: name=%s, vendor=%s, model=%s",
@@ -72,6 +75,7 @@ SUPPORTED_COMMANDS: Final[tuple[str, ...]] = (
     "clean",
     "generate",
     "optimize",
+    "validate",
 )
 
 _MENTION_PATTERN = re.compile(r"<@[^>]+>")
@@ -222,6 +226,33 @@ def _build_optimizer_blocks(sql_query: str, report: str) -> list[dict]:
     ]
 
 
+def _build_validation_blocks(sql_query: str, report: str) -> list[dict]:
+    """
+    Build a Block Kit message layout presenting a SQL validation
+    report alongside the original query.
+
+    Args:
+        sql_query: The original SQL query submitted by the user.
+        report: The structured validation report returned by the AI.
+
+    Returns:
+        A list of Slack Block Kit block dictionaries ready to send.
+    """
+    return [
+        {"type": "header", "text": {"type": "plain_text", "text": "✅ SQL Validation Report"}},
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*Original SQL:*\n```{sql_query}```"},
+        },
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*Validation Report:*\n{report}"},
+        },
+        _build_footer_context(),
+    ]
+
+
 class _CommandSpec(NamedTuple):
     """
     Defines how a single supported command is processed end-to-end.
@@ -268,6 +299,11 @@ _COMMAND_HANDLERS: dict[str, _CommandSpec] = {
         build_blocks=_build_optimizer_blocks,
         missing_input_message="Please paste a SQL query after the optimize command.",
     ),
+    "validate": _CommandSpec(
+        process=validator.validate_sql,
+        build_blocks=_build_validation_blocks,
+        missing_input_message="Please paste a SQL query after the validate command.",
+    ),
 }
 
 # All business-logic services raise their own domain-specific error on
@@ -278,6 +314,7 @@ _BUSINESS_ERRORS = (
     SQLCleanerError,
     SQLGeneratorError,
     SQLOptimizerError,
+    SQLValidatorError,
 )
 
 
@@ -291,9 +328,9 @@ def handle_app_mention(event: dict, say) -> None:
         - If a command is used with no argument text, asks the user
           to provide one.
         - If argument text is present, dispatches to the command's
-          processor (SQLAnalyzer, SQLCleaner, SQLGenerator, or
-          SQLOptimizer) and replies with a Block Kit message
-          containing the result.
+          processor (SQLAnalyzer, SQLCleaner, SQLGenerator,
+          SQLOptimizer, or SQLValidator) and replies with a Block Kit
+          message containing the result.
         - Any failure (parsing, AI service, or unexpected) is caught
           and reported to the user safely, without crashing the app or
           leaking stack traces.

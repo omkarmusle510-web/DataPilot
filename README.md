@@ -1,177 +1,147 @@
 # 🚀 DataPilot AI
 
-**DataPilot AI** is an AI-powered Slack assistant designed for Data Engineers, SQL developers, students, and analysts.
+DataPilot AI is an intelligent Slack assistant that helps developers understand, improve, and generate SQL using Google's Gemini AI.
 
-Instead of switching between documentation, Stack Overflow, and AI chatbots, DataPilot lets you work directly inside Slack to understand, clean, and generate SQL using natural language.
-
----
-
-## ✨ Features
-
-### 🧠 SQL Explanation
-
-Understand complex SQL queries in plain English.
-
-Example
-
-Input
-
-@DataPilot explain
-
-SELECT * FROM employees WHERE salary > 50000;
-
-Output
-
-• Explains what the query does
-• Describes filters
-• Explains returned results
-• Easy for beginners to understand
+Instead of switching between documentation, ChatGPT, Stack Overflow, and SQL editors, users can simply mention the bot inside Slack and receive AI-powered assistance instantly.
 
 ---
 
-### 🧹 SQL Cleaner
+# ✨ Features
 
-Automatically formats messy SQL into clean, readable SQL.
+## 🧠 SQL Explain
+
+Explain complex SQL queries in simple English.
 
 Example
-
-Input
-
-@DataPilot clean
-
-select id,name from employee where salary>10000;
-
-Output
 
 ```sql
-SELECT
-    id,
-    name
-FROM employee
-WHERE salary > 10000;
+SELECT name
+FROM employees
+WHERE salary > 50000;
+```
+
+Output
+
+- Explains what the query does
+- Describes filters
+- Explains returned data
+- Beginner friendly
+
+---
+
+## 🧹 SQL Clean
+
+Automatically formats SQL using professional conventions.
+
+Converts
+
+```sql
+select * from users where age>20
+```
+
+into
+
+```sql
+SELECT *
+FROM users
+WHERE age > 20;
 ```
 
 ---
 
-### ⚡ SQL Generator
+## ⚡ SQL Generate
 
 Generate SQL from natural language.
 
 Example
 
-Input
+```
+generate show top 10 customers by revenue
+```
 
-@DataPilot generate
+Produces a complete ANSI SQL query.
 
-Show the top 5 highest paid employees.
+---
 
-Output
+## 🚀 SQL Optimize
+
+Analyzes SQL performance and suggests improvements.
+
+Example
 
 ```sql
-SELECT
-    employee_name,
-    salary
-FROM employees
-ORDER BY salary DESC
-LIMIT 5;
+SELECT *
+FROM orders
+WHERE YEAR(order_date)=2024;
 ```
+
+Returns
+
+- Performance Rating
+- Bottlenecks
+- Improved Query
+- Expected Benefits
+- Final Recommendation
 
 ---
 
-## 🛠️ Tech Stack
-
-- Python 3.12
-- Slack Bolt
-- Google Gemini API
-- Google AI Studio
-- python-dotenv
-- Modular AI Provider Architecture
-- Object-Oriented Programming
-- Dependency Injection
-
----
-
-## 🏗️ Project Architecture
+# 🏗 Architecture
 
 ```
-Slack Workspace
-        │
-        ▼
-     app.py
-        │
-        ▼
- Command Dispatcher
-        │
- ┌──────┼─────────┐
- ▼      ▼         ▼
-Explain Clean   Generate
- │        │         │
- ▼        ▼         ▼
-Analyzer Cleaner Generator
-        │
-        ▼
- AI Provider Layer
-        │
-        ▼
- Gemini Provider
-        │
-        ▼
- Gemini API
-```
-
----
-
-## 📁 Project Structure
-
-```
-DataPilot/
+app.py
 │
-├── app.py
-├── requirements.txt
-├── README.md
-├── .env.example
-│
-├── services/
+├── services
 │   ├── analyzer.py
 │   ├── cleaner.py
 │   ├── generator.py
-│   └── ai/
+│   ├── optimizer.py
+│   │
+│   └── ai
 │       ├── base.py
 │       ├── gemini_provider.py
 │       ├── provider_factory.py
 │       └── __init__.py
 │
-└── prompts/
+├── prompts
+├── database
+├── bot
+└── assets
 ```
+
+The project follows:
+
+- Dependency Injection
+- Provider Pattern
+- Factory Pattern
+- SOLID Principles
+- Modular Architecture
+
+Changing AI providers only requires adding a provider inside:
+
+```
+services/ai/
+```
+
+without modifying business logic.
 
 ---
 
-## 🚀 Getting Started
+# 🛠 Tech Stack
+
+- Python
+- Slack Bolt SDK
+- Google Gemini API
+- Google AI Studio
+- python-dotenv
+
+---
+
+# Installation
 
 Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/DataPilot.git
-```
-
-Move into the project
-
-```bash
-cd DataPilot
-```
-
-Create a virtual environment
-
-```bash
-python -m venv .venv
-```
-
-Activate it
-
-Windows
-
-```bash
-.venv\Scripts\activate
+git clone https://github.com/omkarmusle510-web/DataPilot.git
 ```
 
 Install dependencies
@@ -180,20 +150,23 @@ Install dependencies
 pip install -r requirements.txt
 ```
 
-Create a `.env` file
+Create a `.env`
 
 ```env
-SLACK_BOT_TOKEN=your_bot_token
-SLACK_APP_TOKEN=your_app_token
+GOOGLE_API_KEY=your_api_key
+
+SLACK_BOT_TOKEN=xoxb-...
+
+SLACK_APP_TOKEN=xapp-...
 
 AI_PROVIDER=gemini
 
-GOOGLE_API_KEY=your_google_api_key
-
 GEMINI_MODEL=gemini-2.5-flash
+
+LOG_LEVEL=INFO
 ```
 
-Run the bot
+Run
 
 ```bash
 python app.py
@@ -201,42 +174,81 @@ python app.py
 
 ---
 
-## 🎯 Current Commands
+# Slack Commands
 
-| Command | Description |
-|----------|-------------|
-| `@DataPilot explain` | Explain SQL queries |
-| `@DataPilot clean` | Format SQL queries |
-| `@DataPilot generate` | Generate SQL from natural language |
+### Explain SQL
 
----
-
-## 🚧 Upcoming Features
-
-- SQL Query Optimizer
-- SQL Insights & Analysis
-- Execution Plan Suggestions
-- CSV Dataset Analysis
-- Database Schema Awareness
-- Interactive SQL Assistant
+```
+@DataPilot explain SELECT * FROM employees;
+```
 
 ---
 
-## 💡 Why DataPilot?
+### Clean SQL
 
-Data engineers and SQL developers spend significant time:
-
-- Understanding legacy SQL
-- Cleaning poorly formatted queries
-- Writing repetitive SQL
-- Switching between documentation and AI tools
-
-DataPilot brings these capabilities directly into Slack, allowing teams to collaborate without leaving their workspace.
+```
+@DataPilot clean select * from employees where salary>50000
+```
 
 ---
 
-## 👨‍💻 Author
+### Generate SQL
 
-Developed by **Mamba**
+```
+@DataPilot generate show all customers who purchased in January
+```
 
-Built for AI and Data Engineering Hackathons 🚀
+---
+
+### Optimize SQL
+
+```
+@DataPilot optimize SELECT * FROM orders WHERE YEAR(order_date)=2024;
+```
+
+---
+
+# Example
+
+### Input
+
+```
+@DataPilot optimize
+SELECT * FROM orders
+WHERE YEAR(order_date)=2024;
+```
+
+### Output
+
+✅ Performance Rating
+
+✅ Optimization Opportunities
+
+✅ Improved SQL
+
+✅ Expected Benefits
+
+✅ Final Recommendation
+
+---
+
+# Future Roadmap
+
+- SQL Validator
+- Query Cost Estimation
+- Execution Plan Analysis
+- Database Schema Understanding
+- Multi-provider AI Support
+- CSV Dataset Cleaning
+- Data Profiling
+- Data Quality Reports
+
+---
+
+# Author
+
+**Omkar Musale**
+
+Data Science Student
+
+Built with ❤️ using Python, Slack Bolt, and Google Gemini.
