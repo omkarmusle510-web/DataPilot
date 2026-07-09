@@ -12,6 +12,10 @@ Responsibilities:
   services.optimizer.SQLOptimizer, and services.validator.SQLValidator,
   all constructed with a single shared AI provider obtained from the
   provider factory.
+- Listen for CSV file uploads and run the Dataset Intelligence
+  workflow via services.file_handler.SlackFileHandler,
+  services.dataset_profiler.DatasetProfiler, and
+  services.dataset_cleaner.DatasetCleaner.
 - Render responses as Slack Block Kit messages.
 - Persist every command execution (successful or failed) to SQLite via
   HistoryRepository, without ever letting a persistence failure affect
@@ -28,6 +32,7 @@ import logging
 import os
 import re
 import time
+from pathlib import Path
 from typing import Callable, Final, NamedTuple
 
 from dotenv import load_dotenv
@@ -41,6 +46,9 @@ from services.cleaner import SQLCleaner, SQLCleanerError
 from services.generator import SQLGenerator, SQLGeneratorError
 from services.optimizer import SQLOptimizer, SQLOptimizerError
 from services.validator import SQLValidator, SQLValidatorError
+from services.file_handler import SlackFileHandler, SlackFileHandlerError
+from services.dataset_profiler import DatasetProfiler, DatasetProfilerError
+from services.dataset_cleaner import DatasetCleaner, DatasetCleanerError
 
 load_dotenv()
 
@@ -64,10 +72,17 @@ generator = SQLGenerator(provider)
 optimizer = SQLOptimizer(provider)
 validator = SQLValidator(provider)
 
+# Dataset Intelligence services. Reuse the same shared `provider`
+# instance already constructed above — never instantiate a second
+# provider.
+file_handler = SlackFileHandler()
+dataset_profiler = DatasetProfiler(provider)
+dataset_cleaner = DatasetCleaner()
+
 # A single DatabaseManager and HistoryRepository are constructed once
 # at startup and reused for the lifetime of the application, mirroring
 # how the shared AI `provider` instance is handled. Never construct
-# these inside handle_app_mention().
+# these inside handle_app_mention() or handle_dataset_file_upload().
 db_manager = DatabaseManager()
 history_repository = HistoryRepository(db_manager)
 
@@ -265,6 +280,132 @@ def _build_validation_blocks(sql_query: str, report: str) -> list[dict]:
     ]
 
 
+def _build_dataset_intelligence_blocks(
+    original_filename: str,
+    original_profile,
+    cleaning_result,
+    cleaned_profile,
+    execution_time: float,
+) -> list[dict]:
+    """
+    Build a Block Kit message layout presenting a full Dataset
+    Intelligence Report: original dataset info, before-cleaning stats,
+    cleaning summary, after-cleaning stats, AI insights, and the
+    cleaned dataset filename.
+
+    Args:
+        original_filename: The original uploaded CSV filename.
+        original_profile: DatasetProfileResult for the dataset before
+            cleaning.
+        cleaning_result: CleaningResult describing the cleaning
+            operation.
+        cleaned_profile: DatasetProfileResult for the dataset after
+            cleaning.
+        execution_time: Total workflow execution time in seconds.
+
+    Returns:
+        A list of Slack Block Kit block dictionaries ready to send.
+    """
+    memory_usage_mb = original_profile.memory_usage_bytes / (1024 * 1024)
+
+    renamed_columns_text = (
+        ", ".join(f"{old} → {new}" for old, new in cleaning_result.renamed_columns.items())
+        if cleaning_result.renamed_columns
+        else "None"
+    )
+    columns_removed_text = ", ".join(cleaning_result.columns_removed) or "None"
+    columns_converted_text = ", ".join(cleaning_result.columns_converted) or "None"
+    cleaning_actions_text = "\n".join(
+        f"• {action}" for action in cleaning_result.cleaning_actions
+    ) or "None"
+
+    return [
+        {"type": "header", "text": {"type": "plain_text", "text": "📊 Dataset Intelligence Report"}},
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"📁 *Dataset Information*\n"
+                    f"*Filename:* {original_filename}\n"
+                    f"*Rows:* {original_profile.rows}\n"
+                    f"*Columns:* {original_profile.columns}\n"
+                    f"*Memory Usage:* {memory_usage_mb:.2f} MB"
+                ),
+            },
+        },
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"📈 *Before Cleaning*\n"
+                    f"*Quality Score:* {original_profile.quality_score}/10\n"
+                    f"*Duplicate Rows:* {original_profile.duplicate_rows}\n"
+                    f"*Missing Values:* {original_profile.total_missing_values}"
+                ),
+            },
+        },
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"🧹 *Cleaning Summary*\n"
+                    f"*Rows Removed:* {cleaning_result.rows_removed}\n"
+                    f"*Duplicate Rows Removed:* {cleaning_result.duplicates_removed}\n"
+                    f"*Empty Rows Removed:* {cleaning_result.empty_rows_removed}\n"
+                    f"*Columns Removed:* {columns_removed_text}\n"
+                    f"*Columns Converted:* {columns_converted_text}\n"
+                    f"*Renamed Columns:* {renamed_columns_text}\n"
+                    f"*Cleaning Actions:*\n{cleaning_actions_text}"
+                ),
+            },
+        },
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"📈 *After Cleaning*\n"
+                    f"*Quality Score:* {cleaned_profile.quality_score}/10\n"
+                    f"*Duplicate Rows:* {cleaned_profile.duplicate_rows}\n"
+                    f"*Missing Values:* {cleaned_profile.total_missing_values}"
+                ),
+            },
+        },
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"💡 *AI Insights*\n{cleaned_profile.ai_report}"},
+        },
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"📂 *Cleaned Dataset*\n*Filename:* {Path(cleaning_result.output_file).name}",
+            },
+        },
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"🤖 DataPilot AI · provider={getattr(provider, 'name', 'unknown')} "
+                        f"· {execution_time:.2f}s"
+                    ),
+                }
+            ],
+        },
+    ]
+
+
 class _CommandSpec(NamedTuple):
     """
     Defines how a single supported command is processed end-to-end.
@@ -329,6 +470,15 @@ _BUSINESS_ERRORS = (
     SQLValidatorError,
 )
 
+# Errors raised by the Dataset Intelligence workflow. Handled
+# identically to _BUSINESS_ERRORS, but kept as a separate tuple since
+# they are raised by a completely independent event handler.
+_DATASET_ERRORS = (
+    SlackFileHandlerError,
+    DatasetProfilerError,
+    DatasetCleanerError,
+)
+
 
 def _save_history(
     user_id: str,
@@ -351,7 +501,7 @@ def _save_history(
     Args:
         user_id: Slack user ID who invoked the command.
         command: Command name (e.g. "explain", "clean", "generate",
-            "optimize", "validate").
+            "optimize", "validate", "dataset").
         input_text: The raw argument text submitted for the command.
         output_text: The result produced by the command, or an empty
             string if the command failed.
@@ -459,6 +609,131 @@ def handle_app_mention(event: dict, say) -> None:
     except Exception:  # noqa: BLE001 - final safety net, never crash the bot
         logger.exception("Unexpected error handling app_mention event.")
         say(text=":warning: Something went wrong while processing your request.")
+
+
+@app.event("message")
+def handle_dataset_file_upload(event: dict, say, client) -> None:
+    """
+    Handle Slack messages that share an uploaded CSV file and run the
+    full Dataset Intelligence workflow: download, profile the original,
+    clean, profile the cleaned result, report, and re-upload.
+
+    This handler is completely independent from handle_app_mention:
+    SQL commands are triggered by @mentions, dataset intelligence is
+    triggered by file_share message events, and neither affects the
+    other's parsing or dispatch logic.
+
+    Behavior:
+        - Ignores any message that is not a file share, or that shares
+          no .csv files.
+        - Downloads the first CSV file via SlackFileHandler.
+        - Profiles the original dataset via DatasetProfiler.
+        - Cleans it via DatasetCleaner.
+        - Profiles the cleaned dataset via DatasetProfiler again (a
+          second, intentional profiling pass over the cleaned output,
+          not a redundant re-read of the original file).
+        - Replies with a Block Kit Dataset Intelligence Report and
+          uploads the cleaned CSV to the same thread.
+        - Persists the outcome to history under the "dataset" command,
+          reusing the existing _save_history() helper exactly as SQL
+          commands do.
+        - Any failure (download, invalid CSV, AI, or cleaning) is
+          reported via a friendly Slack message and is still recorded
+          in history as a failure. The bot never crashes.
+
+    Args:
+        event: The Slack event payload for the message event.
+        say: Slack Bolt's helper for posting a message back to the channel.
+        client: Slack Bolt's WebClient, used to upload the cleaned file.
+    """
+    logger.info("DATASET HANDLER INVOKED. subtype=%s", event.get("subtype"))  # ADD THIS LINE
+    if event.get("subtype") != "file_share":
+        return
+
+    csv_files = [
+        f for f in event.get("files", []) if f.get("name", "").lower().endswith(".csv")
+    ]
+    if not csv_files:
+        return
+
+    slack_file = csv_files[0]
+    original_filename = slack_file.get("name", "upload.csv")
+    download_url = slack_file.get("url_private_download", "")
+    user_id = event.get("user", "unknown")
+    channel_id = event.get("channel")
+    thread_ts = event.get("ts")
+
+    start_time = time.perf_counter()
+
+    try:
+        local_path = file_handler.download_csv(download_url, original_filename)
+        original_profile = dataset_profiler.profile_dataset(local_path)
+        cleaning_result = dataset_cleaner.clean_dataset(local_path)
+        cleaned_profile = dataset_profiler.profile_dataset(cleaning_result.output_file)
+
+        execution_time = time.perf_counter() - start_time
+        _save_history(
+            user_id=user_id,
+            command="dataset",
+            input_text=original_filename,
+            output_text=cleaned_profile.ai_report,
+            execution_time=execution_time,
+            duration_ms=int(execution_time * 1000),
+            success=True,
+            error_message=None,
+        )
+
+        say(
+            blocks=_build_dataset_intelligence_blocks(
+                original_filename=original_filename,
+                original_profile=original_profile,
+                cleaning_result=cleaning_result,
+                cleaned_profile=cleaned_profile,
+                execution_time=execution_time,
+            ),
+            text="Dataset Intelligence Report",
+            thread_ts=thread_ts,
+        )
+
+        client.files_upload_v2(
+            channel=channel_id,
+            thread_ts=thread_ts,
+            file=cleaning_result.output_file,
+            filename=Path(cleaning_result.output_file).name,
+            initial_comment="📂 Here's your cleaned dataset:",
+        )
+
+    except _DATASET_ERRORS as exc:
+        execution_time = time.perf_counter() - start_time
+        _save_history(
+            user_id=user_id,
+            command="dataset",
+            input_text=original_filename,
+            output_text="",
+            execution_time=execution_time,
+            duration_ms=int(execution_time * 1000),
+            success=False,
+            error_message=str(exc),
+        )
+        logger.warning("Dataset intelligence workflow failed: %s", exc)
+        say(text=f":warning: {exc}", thread_ts=thread_ts)
+    except Exception:  # noqa: BLE001 - final safety net, never crash the bot
+        execution_time = time.perf_counter() - start_time
+        _save_history(
+            user_id=user_id,
+            command="dataset",
+            input_text=original_filename,
+            output_text="",
+            execution_time=execution_time,
+            duration_ms=int(execution_time * 1000),
+            success=False,
+            error_message="Unexpected error during dataset processing.",
+        )
+        logger.exception("Unexpected error handling dataset file upload event.")
+        say(
+            text=":warning: Something went wrong while processing your dataset.",
+            thread_ts=thread_ts,
+        )
 
 
 if __name__ == "__main__":
