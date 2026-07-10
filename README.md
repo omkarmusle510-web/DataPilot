@@ -1,14 +1,55 @@
 # 🚀 DataPilot AI
 
-DataPilot AI is an intelligent Slack assistant that helps developers understand, improve, and generate SQL using Google's Gemini AI.
+<p align="center">
+  <img src="assets/logo.png" alt="DataPilot AI" width="180"/>
+</p>
 
-Instead of switching between documentation, ChatGPT, Stack Overflow, and SQL editors, users can simply mention the bot inside Slack and receive AI-powered assistance instantly.
+<p align="center">
+An AI-powered Slack Assistant for SQL Intelligence and Dataset Intelligence.<br>
+Analyze SQL, clean datasets, generate insights, and boost data engineering productivity directly inside Slack.
+</p>
+
+<p align="center">
+
+![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
+![Slack](https://img.shields.io/badge/Slack-Bolt-4A154B?logo=slack)
+![SQLite](https://img.shields.io/badge/Database-SQLite-blue)
+![Gemini](https://img.shields.io/badge/Google-Gemini-orange)
+![Groq](https://img.shields.io/badge/Groq-Supported-green)
+![License](https://img.shields.io/badge/License-MIT-success)
+
+</p>
 
 ---
 
-# ✨ Features
+# 📌 Overview
 
-## 🧠 SQL Explain
+Modern data engineers constantly switch between SQL editors, documentation, AI tools, spreadsheets, and collaboration platforms.
+
+**DataPilot AI** brings all of these capabilities into **Slack**, allowing developers to:
+
+- Explain SQL
+- Generate SQL
+- Optimize SQL
+- Validate SQL
+- Clean SQL
+- Profile datasets
+- Automatically clean CSV files
+- Generate AI-powered dataset reports
+- Download cleaned datasets
+- Track command history
+
+without ever leaving Slack.
+
+---
+
+# ✨ Key Features
+
+---
+
+## 🧠 SQL Intelligence
+
+### 🔍 SQL Explain
 
 Explain complex SQL queries in simple English.
 
@@ -20,128 +61,319 @@ FROM employees
 WHERE salary > 50000;
 ```
 
-Output
+Returns
 
-- Explains what the query does
-- Describes filters
-- Explains returned data
-- Beginner friendly
+- Query purpose
+- Table relationships
+- Filters explained
+- Beginner-friendly explanation
 
 ---
 
-## 🧹 SQL Clean
+### 🧹 SQL Clean
 
-Automatically formats SQL using professional conventions.
+Automatically formats SQL using professional formatting standards.
 
-Converts
+Example
+
+Before
 
 ```sql
-select * from users where age>20
+select * from employees where salary>50000
 ```
 
-into
+After
 
 ```sql
 SELECT *
-FROM users
-WHERE age > 20;
+FROM employees
+WHERE salary > 50000;
 ```
 
 ---
 
-## ⚡ SQL Generate
+### ⚡ SQL Generate
 
 Generate SQL from natural language.
 
 Example
 
 ```
-generate show top 10 customers by revenue
-```
-
-Produces a complete ANSI SQL query.
-
----
-
-## 🚀 SQL Optimize
-
-Analyzes SQL performance and suggests improvements.
-
-Example
-
-```sql
-SELECT *
-FROM orders
-WHERE YEAR(order_date)=2024;
+@DataPilot generate Show top 10 customers by revenue
 ```
 
 Returns
 
-- Performance Rating
-- Bottlenecks
-- Improved Query
-- Expected Benefits
-- Final Recommendation
+```sql
+SELECT customer_name,
+SUM(revenue)
+FROM sales
+GROUP BY customer_name
+ORDER BY SUM(revenue) DESC
+LIMIT 10;
+```
 
 ---
 
-# 🏗 Architecture
+### 🚀 SQL Optimize
+
+Analyze SQL performance.
+
+Returns
+
+- Performance Score
+- Bottlenecks
+- Optimized Query
+- Expected Improvements
+- Best Practices
+
+---
+
+### ✅ SQL Validate
+
+Detects
+
+- Syntax problems
+- Bad SQL practices
+- Potential issues
+- Query recommendations
+
+---
+
+# 📊 Dataset Intelligence
+
+Simply upload a CSV file to Slack.
+
+DataPilot automatically:
+
+✅ Downloads the dataset
+
+✅ Profiles the dataset
+
+✅ Detects quality issues
+
+✅ Generates AI insights
+
+✅ Cleans the dataset
+
+✅ Uploads the cleaned CSV back to Slack
+
+---
+
+## 📈 AI Dataset Report
+
+Automatically generates:
+
+- Dataset Overview
+- Key Insights
+- Data Quality Analysis
+- Cleaning Recommendations
+- Suggested Visualizations
+- Suggested SQL Analysis
+
+---
+
+## 🧹 Automatic Dataset Cleaning
+
+The cleaning engine automatically performs:
+
+- Duplicate removal
+- Empty row removal
+- Empty column removal
+- Column name standardization
+- Missing value handling
+- Numeric conversion
+- Date conversion
+- Whitespace trimming
+- Constant column detection
+- Outlier detection
+- Data type normalization
+
+---
+
+## 📥 Clean Dataset Download
+
+After cleaning,
+
+DataPilot uploads a cleaned CSV directly into the Slack thread for download.
+
+No manual work required.
+
+---
+
+# 🗂 Command History
+
+Every command execution is automatically stored.
+
+History includes
+
+- User ID
+- Command
+- Input
+- Output
+- AI Provider
+- AI Model
+- Execution Time
+- Success / Failure
+- Timestamp
+
+SQLite is used as the local history database.
+
+---
+
+# 🤖 Multiple AI Providers
+
+DataPilot follows a Provider Pattern.
+
+Currently supported:
+
+- Google Gemini
+- Groq
+
+Switching providers only requires updating
 
 ```
-app.py
-│
-├── services
-│   ├── analyzer.py
-│   ├── cleaner.py
-│   ├── generator.py
-│   ├── optimizer.py
-│   │
-│   └── ai
-│       ├── base.py
-│       ├── gemini_provider.py
-│       ├── provider_factory.py
-│       └── __init__.py
-│
-├── prompts
-├── database
-├── bot
-└── assets
+AI_PROVIDER=gemini
 ```
 
-The project follows:
+or
 
-- Dependency Injection
+```
+AI_PROVIDER=groq
+```
+
+No business logic changes are required.
+
+---
+
+# 🏗 System Architecture
+
+```
+                        Slack Workspace
+                              │
+                              ▼
+                     Slack Socket Mode
+                              │
+                              ▼
+                           app.py
+                              │
+          ┌───────────────────┼────────────────────┐
+          │                   │                    │
+          ▼                   ▼                    ▼
+     SQL Services      Dataset Services      History System
+          │                   │                    │
+          │                   │                    ▼
+          │            File Handler          SQLite Database
+          │                   │
+          ▼                   ▼
+   SQL Analyzer        Dataset Profiler
+   SQL Cleaner         Dataset Cleaner
+   SQL Generator
+   SQL Optimizer
+   SQL Validator
+          │
+          ▼
+     AI Provider Factory
+          │
+     ┌────┴────┐
+     ▼         ▼
+  Gemini      Groq
+```
+
+---
+
+# 🧩 Design Principles
+
+The project follows modern software engineering principles.
+
+- SOLID Principles
 - Provider Pattern
 - Factory Pattern
-- SOLID Principles
+- Dependency Injection
 - Modular Architecture
+- Separation of Concerns
+- Clean Code Practices
 
-Changing AI providers only requires adding a provider inside:
-
-```
-services/ai/
-```
-
-without modifying business logic.
+Every service is independent and easily extendable.
 
 ---
 
 # 🛠 Tech Stack
 
+## Backend
+
 - Python
+
+## AI
+
+- Google Gemini
+- Groq
+
+## Slack
+
 - Slack Bolt SDK
-- Google Gemini API
-- Google AI Studio
+- Slack Socket Mode
+
+## Data Processing
+
+- Pandas
+
+## Database
+
+- SQLite
+
+## Configuration
+
 - python-dotenv
 
 ---
 
-# Installation
+# 📂 Project Structure
+
+```
+DataPilot/
+│
+├── app.py
+│
+├── services/
+│   ├── analyzer.py
+│   ├── cleaner.py
+│   ├── generator.py
+│   ├── optimizer.py
+│   ├── validator.py
+│   ├── dataset_profiler.py
+│   ├── dataset_cleaner.py
+│   ├── file_handler.py
+│   │
+│   └── ai/
+│       ├── base.py
+│       ├── provider_factory.py
+│       ├── gemini_provider.py
+│       └── groq_provider.py
+│
+├── database/
+│
+├── prompts/
+│
+├── assets/
+│
+└── data/
+```
+
+---
+
+# ⚙ Installation
 
 Clone the repository
 
 ```bash
 git clone https://github.com/omkarmusle510-web/DataPilot.git
+```
+
+Move into the project
+
+```bash
+cd DataPilot
 ```
 
 Install dependencies
@@ -153,15 +385,15 @@ pip install -r requirements.txt
 Create a `.env`
 
 ```env
-GOOGLE_API_KEY=your_api_key
-
 SLACK_BOT_TOKEN=xoxb-...
 
 SLACK_APP_TOKEN=xapp-...
 
-AI_PROVIDER=gemini
+GOOGLE_API_KEY=your_google_api_key
 
-GEMINI_MODEL=gemini-2.5-flash
+GROQ_API_KEY=your_groq_api_key
+
+AI_PROVIDER=groq
 
 LOG_LEVEL=INFO
 ```
@@ -174,7 +406,7 @@ python app.py
 
 ---
 
-# Slack Commands
+# 💬 Slack Commands
 
 ### Explain SQL
 
@@ -187,7 +419,7 @@ python app.py
 ### Clean SQL
 
 ```
-@DataPilot clean select * from employees where salary>50000
+@DataPilot clean SELECT * FROM employees WHERE salary>50000;
 ```
 
 ---
@@ -195,64 +427,89 @@ python app.py
 ### Generate SQL
 
 ```
-@DataPilot generate show all customers who purchased in January
+@DataPilot generate Show total sales by month
 ```
 
 ---
 
 ### Optimize SQL
 
-<<<<<<< HEAD
-Developed by **OMKAR MUSALE**
-=======
 ```
 @DataPilot optimize SELECT * FROM orders WHERE YEAR(order_date)=2024;
 ```
->>>>>>> 9c3ca32 (Add complete SQL AI toolkit with explain, clean, generate, optimize and validate features)
 
 ---
 
-# Example
-
-### Input
+### Validate SQL
 
 ```
-@DataPilot optimize
-SELECT * FROM orders
-WHERE YEAR(order_date)=2024;
+@DataPilot validate SELECT * FROM employees;
 ```
 
-### Output
+---
 
-✅ Performance Rating
+### Dataset Intelligence
 
-✅ Optimization Opportunities
+Simply upload a CSV file into Slack.
 
-✅ Improved SQL
+DataPilot automatically performs the entire workflow.
 
-✅ Expected Benefits
-
-✅ Final Recommendation
+No command required.
 
 ---
 
-# Future Roadmap
+# 📸 Demo
 
-- SQL Validator
-- Query Cost Estimation
-- Execution Plan Analysis
-- Database Schema Understanding
-- Multi-provider AI Support
-- CSV Dataset Cleaning
-- Data Profiling
-- Data Quality Reports
+## SQL Assistant
+
+*(Add screenshot here)*
+
+```
+assets/sql_demo.png
+```
 
 ---
 
-# Author
+## Dataset Intelligence
+
+*(Add screenshot here)*
+
+```
+assets/dataset_demo.png
+```Future Enhancements
+
+- Excel (.xlsx) support
+- Interactive dashboards
+- Automatic visualization generation
+- OpenAI support
+- Claude support
+- OpenRouter integration
+- Multi-file dataset comparison
+- Cloud deployment
+- Real-time collaboration analytics
+
+---
+
+# 👨‍💻 Author
 
 **Omkar Musale**
 
 Data Science Student
 
-Built with ❤️ using Python, Slack Bolt, and Google Gemini.
+Mumbai University
+
+---
+
+# ⭐ Acknowledgements
+
+Built using
+
+- Python
+- Slack Bolt SDK
+- Google Gemini
+- Groq
+- Pandas
+- SQLite
+
+---
+⭐ If you found this project interesting, consider giving it a star!
