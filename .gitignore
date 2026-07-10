@@ -10,9 +10,6 @@ venv/
 # Database
 *.db
 
-# Uploads
-data/uploads/
-
 # Logs
 *.log
 
