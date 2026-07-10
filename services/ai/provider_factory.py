@@ -21,7 +21,7 @@ from services.ai.groq_provider import GroqProvider
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PROVIDER = "gemini"
+_DEFAULT_PROVIDER = "groq"
 
 # Registry mapping a provider name (as configured via AI_PROVIDER) to a
 # zero-argument callable that constructs the corresponding AIProvider.
