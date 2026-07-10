@@ -1,0 +1,11 @@
+Customer Name,Order Date,Revenue ($),Quantity,Gender,Country,Email,Notes,EmptyColumn,ConstantColumn,Messy Numbers
+ Alice ,2024/01/02,"1,200",10,female, India ,alice@example.com,VIP,,DataPilot,"1,000"
+ALICE,02-01-2024,1200,10,Female,India,alice@example.com,VIP,,DataPilot,2500
+Bob,Jan 5 2024,950,5,MALE,USA,bob@example,NA,,DataPilot,"3,500"
+Charlie,,"2,500",NULL,male,usa ,charlie@example.com,  Good  customer ,,DataPilot,4000
+Dana,2024-01-08,-,8,Female,Canada,,N/A,,DataPilot,NA
+Eve,2024/13/01,9999999,1,FEMALE,Canada,eve@example.com,Outlier revenue,,DataPilot,"5,250"
+ Frank ,2024-02-01,300,3,Male,UK,frank@example.com,     Multiple     spaces    ,,DataPilot,600
+Grace,2024-02-01,300,3,Male,UK,frank@example.com,Duplicate-ish,,DataPilot,700
+ Frank ,2024-02-01,300,3,Male,UK,frank@example.com,     Multiple     spaces    ,,DataPilot,600
+,,,,,,,,,DataPilot, 
